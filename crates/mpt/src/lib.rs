@@ -10,10 +10,9 @@ mod execution_witness;
 
 /// Module containing MPT code adapted from `zeth`.
 mod mpt;
-pub use mpt::Error;
+pub use mpt::{Error, MptNode, MptNodeData};
 use mpt::{
     mpt_from_proof, parse_proof, proofs_to_tries, resolve_nodes, transition_proofs_to_tries,
-    MptNode,
 };
 
 /// Ethereum state trie and account storage tries.

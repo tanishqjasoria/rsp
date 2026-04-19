@@ -1283,6 +1283,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bench_from_rpc"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rlp",
+ "async-trait",
+ "bincode",
+ "clap",
+ "eyre",
+ "hex",
+ "reth-chainspec",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-primitives-traits",
+ "reth-trie",
+ "revm",
+ "revm-database",
+ "revm-primitives",
+ "revm-state",
+ "rsp-client-executor",
+ "rsp-host-executor",
+ "rsp-mpt",
+ "rsp-primitives",
+ "rsp-provider",
+ "rsp-rpc-db",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "bimap"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
