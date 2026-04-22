@@ -195,6 +195,16 @@ async fn main() -> Result<()> {
         client_input.parent_state.storage_tries.len(),
     );
 
+    // Collect the 256 most-recent ancestor block hashes (youngest first:
+    // [N-1, N-2, ...]). rpc_db.ancestor_headers() already walks the parent
+    // chain via eth_getBlockByHash; reuse it. If fewer than 256 ancestors
+    // exist (early chain history), we emit what we have.
+    let ancestor_hashes: Vec<B256> = client_input
+        .ancestor_headers
+        .iter()
+        .map(|h| h.hash_slow())
+        .collect();
+
     let zig_bytes = build_zig_blob(
         &current_block,
         &previous_block,
@@ -202,6 +212,7 @@ async fn main() -> Result<()> {
         storage_ref.read().unwrap().iter().map(|(a, s)| (*a, s.clone().into_iter().collect::<Vec<_>>())).collect(),
         witness_nodes,
         storage_witness_nodes,
+        ancestor_hashes,
     )?;
     let zig_path = args.out.with_extension("zig.bin");
     std::fs::write(&zig_path, &zig_bytes)?;
@@ -291,6 +302,7 @@ fn build_zig_blob(
     storage: Vec<(Address, Vec<(U256, U256)>)>,
     witness_nodes: Vec<(B256, Vec<u8>)>,
     storage_witness_nodes: Vec<(B256, Vec<u8>)>,
+    ancestor_hashes: Vec<B256>,
 ) -> Result<Vec<u8>> {
     use alloy_rlp::Encodable;
 
@@ -424,11 +436,21 @@ fn build_zig_blob(
         rlp_encode_u64(parent_hdr.excess_blob_gas().unwrap_or(0)),
     ]);
 
-    // ---- outer list (v4, 10 items) ----
+    // ---- ancestor_hashes (v5): 256 recent ancestor block hashes ----
+    // Ordered youngest-first: position 0 = parent (N-1), position 1 = N-2, ...
+    // BLOCKHASH opcode for `block_number = N-k` indexes into this at k-1.
+    let mut hash_items: Vec<Vec<u8>> = Vec::new();
+    for h in ancestor_hashes.iter() {
+        hash_items.push(rlp_encode_bytes(h.as_slice()));
+    }
+    let ancestor_hashes_rlp = rlp_encode_list(&hash_items);
+
+    // ---- outer list (v5, 11 items) ----
     let out = rlp_encode_list(&[
         block_input, pre_state, raw_tx_list, withdrawals_rlp,
         prev_root_rlp, post_root_rlp, witness_rlp,
         storage_witness_rlp, header_rlp, parent_summary,
+        ancestor_hashes_rlp,
     ]);
     Ok(out)
 }
