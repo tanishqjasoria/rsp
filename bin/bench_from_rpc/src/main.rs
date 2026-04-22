@@ -207,6 +207,40 @@ async fn main() -> Result<()> {
     std::fs::write(&zig_path, &zig_bytes)?;
     tracing::info!("wrote {} bytes to {}", zig_bytes.len(), zig_path.display());
 
+    // ---- Sidecar: per-account post-state oracle for diffing zig-evm ----
+    // RLP-encoded list of [addr, balance, nonce, code_hash, storage_list]
+    // where storage_list = [[slot, value], ...]. Only touched accounts.
+    let mut diff_entries: Vec<Vec<u8>> = Vec::new();
+    for (addr, account) in execution_output.state.state.iter() {
+        let info = match &account.info {
+            Some(i) => i,
+            None => continue, // self-destructed in this block; skip
+        };
+        let mut slots: Vec<Vec<u8>> = Vec::new();
+        for (slot, slot_value) in account.storage.iter() {
+            slots.push(rlp_encode_list(&[
+                rlp_encode_u256(slot),
+                rlp_encode_u256(&slot_value.present_value),
+            ]));
+        }
+        diff_entries.push(rlp_encode_list(&[
+            rlp_encode_bytes(addr.as_slice()),
+            rlp_encode_u256(&info.balance),
+            rlp_encode_u64(info.nonce),
+            rlp_encode_bytes(info.code_hash.as_slice()),
+            rlp_encode_list(&slots),
+        ]));
+    }
+    let diff_rlp = rlp_encode_list(&diff_entries);
+    let diff_path = args.out.with_extension("diff.bin");
+    std::fs::write(&diff_path, &diff_rlp)?;
+    tracing::info!(
+        "wrote {} bytes ({} touched accounts) to {}",
+        diff_rlp.len(),
+        diff_entries.len(),
+        diff_path.display()
+    );
+
     // Also print a short summary.
     println!("block={block_number} txs={tx_count} pre_state_accounts={} storage_entries={}",
         accounts_ref.read().unwrap().len(),
@@ -264,7 +298,7 @@ fn build_zig_blob(
 
     // ---- block_input fields (11-item rlp list) ----
     let chain_id: U256 = U256::from(1u64); // mainnet
-    let fork: u8 = fork_for_block(header.number());
+    let fork: u8 = fork_for_block(header.timestamp(), header.number());
     let parent_hash = previous_block.header().hash_slow();
 
     let block_input = rlp_encode_list(&[
@@ -283,8 +317,23 @@ fn build_zig_blob(
 
     // ---- pre_state: list of account entries ----
     let mut account_entries: Vec<Vec<u8>> = Vec::new();
+    let mut skipped_empty = 0usize;
     for (addr, info) in accounts.iter() {
+        // Reth's BasicRpcDb populates AccountInfo::default() (zero balance,
+        // zero nonce, no code) for any address the EVM touches that doesn't
+        // actually exist on chain. Those accounts have NO leaf in the state
+        // trie — only a non-inclusion proof. The pre-state list must mirror
+        // what the witness actually contains, otherwise the S3 cross-check
+        // (`witness_crosscheck.zig::PreStateAccountMissingFromWitness`)
+        // rejects the blob. Filter them out at the source.
         let code_bytes = info.code.as_ref().map(|c| c.original_bytes().to_vec()).unwrap_or_default();
+        let is_empty = info.balance.is_zero()
+            && info.nonce == 0
+            && code_bytes.is_empty();
+        if is_empty {
+            skipped_empty += 1;
+            continue;
+        }
 
         // Collect this address's storage slots.
         let empty = Vec::new();
@@ -312,6 +361,9 @@ fn build_zig_blob(
             rlp_encode_bytes(&code_bytes),
             rlp_encode_list(&storage_list),
         ]));
+    }
+    if skipped_empty > 0 {
+        tracing::info!("skipped {skipped_empty} empty/non-existent accounts (no witness leaf)");
     }
     let pre_state = rlp_encode_list(&account_entries);
 
@@ -455,11 +507,17 @@ fn minimal_be_bytes(v: u64) -> Vec<u8> {
 ///   Prague = 1
 ///   Osaka  = 2
 ///
-/// Zig-evm is Cancun-only today; pre-Cancun blocks can't be benchmarked by
-/// this guest (block_executor.zig unconditionally runs EIP-4788 beacon-roots
-/// system calls). The encoder rejects pre-Cancun blocks at build time.
-fn fork_for_block(number: u64) -> u8 {
-    if number >= 22_431_084 { 1 /* Prague (approx mainnet activation) */ }
-    else if number >= 19_426_589 { 0 /* Cancun */ }
-    else { panic!("block {number} predates Cancun; zig-evm's block executor requires Cancun+") }
+/// Detection is timestamp-based (matches execution-specs ForkCriteria), not
+/// block-number-based, because timestamps are stable across reorgs and match
+/// what the EVM consensus layer actually keys off.
+///
+/// Mainnet activation timestamps:
+///   Cancun: 1710338135 (2024-03-13 13:55:35 UTC)
+///   Prague: 1746612311 (2025-05-07 10:05:11 UTC)
+///   Osaka:  1764798551 (2025-12-03 21:49:11 UTC) — aka Fusaka
+fn fork_for_block(timestamp: u64, number: u64) -> u8 {
+    if timestamp >= 1_764_798_551 { 2 /* Osaka */ }
+    else if timestamp >= 1_746_612_311 { 1 /* Prague */ }
+    else if timestamp >= 1_710_338_135 { 0 /* Cancun */ }
+    else { panic!("block {number} (ts={timestamp}) predates Cancun; zig-evm requires Cancun+") }
 }
