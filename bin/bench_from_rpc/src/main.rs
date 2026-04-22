@@ -506,6 +506,8 @@ fn minimal_be_bytes(v: u64) -> Vec<u8> {
 ///   Cancun = 0
 ///   Prague = 1
 ///   Osaka  = 2
+///   Bpo1   = 3   (EIP-7892 Blob Parameter Only fork #1)
+///   Bpo2   = 4   (EIP-7892 Blob Parameter Only fork #2)
 ///
 /// Detection is timestamp-based (matches execution-specs ForkCriteria), not
 /// block-number-based, because timestamps are stable across reorgs and match
@@ -515,8 +517,12 @@ fn minimal_be_bytes(v: u64) -> Vec<u8> {
 ///   Cancun: 1710338135 (2024-03-13 13:55:35 UTC)
 ///   Prague: 1746612311 (2025-05-07 10:05:11 UTC)
 ///   Osaka:  1764798551 (2025-12-03 21:49:11 UTC) — aka Fusaka
+///   Bpo1:   1765290071 (2025-12-09 14:21:11 UTC)
+///   Bpo2:   1767747671 (2026-01-07 01:01:11 UTC)
 fn fork_for_block(timestamp: u64, number: u64) -> u8 {
-    if timestamp >= 1_764_798_551 { 2 /* Osaka */ }
+    if timestamp >= 1_767_747_671 { 4 /* Bpo2 */ }
+    else if timestamp >= 1_765_290_071 { 3 /* Bpo1 */ }
+    else if timestamp >= 1_764_798_551 { 2 /* Osaka */ }
     else if timestamp >= 1_746_612_311 { 1 /* Prague */ }
     else if timestamp >= 1_710_338_135 { 0 /* Cancun */ }
     else { panic!("block {number} (ts={timestamp}) predates Cancun; zig-evm requires Cancun+") }
