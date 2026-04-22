@@ -357,16 +357,22 @@ fn build_zig_blob(
     current_block.header().encode(&mut header_buf);
     let header_rlp = rlp_encode_bytes(&header_buf);
 
-    // ---- parent_header_summary: (gas_limit, base_fee, timestamp) ----
+    // ---- parent_header_summary (v4): 6-item list ----
+    // (gas_limit, base_fee, timestamp, gas_used, blob_gas_used,
+    //  excess_blob_gas) — needed by the guest for EIP-1559 basefee
+    // and EIP-4844 blob-basefee transition checks.
     let parent_hdr = previous_block.header();
     let parent_base_fee = U256::from(parent_hdr.base_fee_per_gas().unwrap_or(0));
     let parent_summary = rlp_encode_list(&[
         rlp_encode_u64(parent_hdr.gas_limit()),
         rlp_encode_u256(&parent_base_fee),
         rlp_encode_u64(parent_hdr.timestamp()),
+        rlp_encode_u64(parent_hdr.gas_used()),
+        rlp_encode_u64(parent_hdr.blob_gas_used().unwrap_or(0)),
+        rlp_encode_u64(parent_hdr.excess_blob_gas().unwrap_or(0)),
     ]);
 
-    // ---- outer list (v3, 10 items) ----
+    // ---- outer list (v4, 10 items) ----
     let out = rlp_encode_list(&[
         block_input, pre_state, raw_tx_list, withdrawals_rlp,
         prev_root_rlp, post_root_rlp, witness_rlp,
